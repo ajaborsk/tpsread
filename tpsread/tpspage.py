@@ -4,21 +4,20 @@ TPS File Page
 
 from warnings import warn
 
-from construct import Array, Byte, Struct, ULInt16, ULInt32
+from construct import Array, Byte, Struct, Int16ul, Int32ul
 
 from .utils import check_value
 
 
 # Page header
-PAGE_HEADER_STRUCT = Struct('page',
-                            ULInt32('offset'),
+PAGE_HEADER_STRUCT = 'page' / Struct('offset' / Int32ul,
                             # size - total size with header
-                            ULInt16('size'),
-                            ULInt16('uncompressed_size'),
+                            'size' / Int16ul,
+                            'uncompressed_size' / Int16ul,
                             # ??? self.uncompressed_unabridged_size strange value
-                            ULInt16('uncompressed_unabridged_size'),
-                            ULInt16('record_count'),
-                            Byte('hierarchy_level'), )
+                            'uncompressed_unabridged_size' / Int16ul,
+                            'record_count' / Int16ul,
+                            'hierarchy_level' / Byte, )
 
 
 class TpsPage:
@@ -33,7 +32,7 @@ class TpsPage:
         page = PAGE_HEADER_STRUCT.parse(self.tps.read(PAGE_HEADER_STRUCT.sizeof()))
 
         if page.hierarchy_level != 0:
-            page.data = Array(lambda ctx: page.record_count, ULInt32('page_child_ref')).parse(
+            page.data = Array(lambda ctx: page.record_count, 'page_child_ref' / Int32ul).parse(
                 self.tps.read(page.size - PAGE_HEADER_STRUCT.sizeof()))
 
         self.offset = page.offset

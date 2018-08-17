@@ -1,55 +1,60 @@
-from construct import Byte, Bytes, Embed, Enum, IfThenElse, Peek, String, Struct, Switch, UBInt32, ULInt16, ULInt32
+from construct import Byte, Bytes, Embedded, EmbeddedSwitch, Enum, IfThenElse, Peek, PaddedString, Struct, Switch, Int32ub, Int16ul, Int32ul, Probe, Const, this
 
 from .tpspage import PAGE_HEADER_STRUCT
 from .utils import check_value
 
-record_encoding = None
+record_encoding = 'ascii'
 
-RECORD_TYPE = Enum(Byte('type'),
+#RECORD_TYPE = 'type' / Enum(Byte,
+#                   NULL=None,
+#                   DATA=0xF3,
+#                   METADATA=0xF6,
+#                   TABLE_DEFINITION=0xFA,
+#                   TABLE_NAME=0xFE,
+#                   _default_='INDEX', )
+RECORD_TYPE = 'type' / Enum(Byte,
                    NULL=None,
                    DATA=0xF3,
                    METADATA=0xF6,
                    TABLE_DEFINITION=0xFA,
-                   TABLE_NAME=0xFE,
-                   _default_='INDEX', )
+                   TABLE_NAME=0xFE,)
 
-DATA_RECORD_DATA = Struct('field_data',
-                          UBInt32('record_number'),
-                          Bytes('data', lambda ctx: ctx['data_size'] - 9))
+DATA_RECORD_DATA = 'field_data' / Struct('record_number' / Int32ub,
+                                         'data' / Bytes(this.data_size - 9))
 
-METADATA_RECORD_DATA = Struct('field_metadata',
-                              Byte('metadata_type'),
-                              ULInt32('metadata_record_count'),
-                              ULInt32('metadata_record_last_access'))
+METADATA_RECORD_DATA = 'field_metadata' / Struct('metadata_type' / Byte,
+                              'metadata_record_count' / Int32ul,
+                              'metadata_record_last_access' / Int32ul)
 
-TABLE_DEFINITION_RECORD_DATA = Struct('table_definition',
-                                      Bytes('table_definition_bytes', lambda ctx: ctx['data_size'] - 5))
+TABLE_DEFINITION_RECORD_DATA = 'table_definition' / Struct('table_definition_bytes' / Bytes(this.data_size - 5))
 
-INDEX_RECORD_DATA = Struct('field_index',
-                           Bytes('data', lambda ctx: ctx['data_size'] - 10),
-                           ULInt32('record_number'))
+INDEX_RECORD_DATA = 'field_index' / Struct(
+                           'data_i' / Bytes(this.data_size - 10),
+                           'record_number_i' / Int32ul)
 
-RECORD_STRUCT = Struct('record',
-                       ULInt16('data_size'),
-                       Peek(Byte('first_byte')),
-                       Embed(IfThenElse('record_type', lambda ctx: ctx['first_byte'] == 0xFE,
-                                        Embed(Struct('record',
-                                                     RECORD_TYPE,
-                                                     String('table_name', lambda ctx: ctx['data_size'] - 5,
+#print(INDEX_RECORD_DATA)
+
+RECORD_STRUCT =   'record' / EmbeddedSwitch( Struct('data_size' / Int16ul,
+                                              'first_byte' / Peek(Byte),),
+#                         False,
+                        this.first_byte == 0xFE, # 'record_type' / IfThenElse,
+                                        {True: Struct(
+                                                     'type_n' / RECORD_TYPE,
+                                                     'table_name' / PaddedString(this.data_size - 5,
                                                             encoding=record_encoding),
-                                                     UBInt32('table_number'), )),
-                                        Embed(Struct('record',
-                                                     UBInt32('table_number'),
-                                                     RECORD_TYPE,
-                                                     Switch('record_type',
-                                                            lambda ctx: ctx.type,
-                                                            {
-                                                                'DATA': Embed(DATA_RECORD_DATA),
-                                                                'METADATA': Embed(METADATA_RECORD_DATA),
-                                                                'TABLE_DEFINITION': Embed(
-                                                                    TABLE_DEFINITION_RECORD_DATA),
-                                                                'INDEX': Embed(INDEX_RECORD_DATA)
-                                                            }))))))
+                                                     'table_number_n' / Int32ub,
+                                                     ),
+                                         False: EmbeddedSwitch(Struct(
+                                                     'table_number' / Int32ub,
+                                                     RECORD_TYPE,),
+                                                     this.type,
+                                                      {
+                                                       'DATA': (DATA_RECORD_DATA),
+                                                       'METADATA': (METADATA_RECORD_DATA),
+                                                       'TABLE_DEFINITION': (
+                                                                TABLE_DEFINITION_RECORD_DATA),
+                                                       'INDEX': (INDEX_RECORD_DATA)
+                                                       })} )
 
 
 class TpsRecord:
@@ -65,8 +70,20 @@ class TpsRecord:
         if data_size == 0:
             self.type = 'NULL'
         else:
+            #print("self.data_bytes=", self.data_bytes)
             self.data = RECORD_STRUCT.parse(self.data_bytes)
+            
+            # Small workaround for EmbeddedSwitch inability to share a field name
+            if self.data.table_number_n is not None:
+                self.data.table_number = self.data.table_number_n
+            if self.data.type_n is not None:
+                self.data.type = self.data.type_n
+             
+            #TODO: Index records are ignored...
+                
+            #print("self.data=", self.data)
             self.type = self.data.type
+            #print('record type:', self.data.type)
 
 
 class TpsRecordsList:
@@ -110,7 +127,7 @@ class TpsRecordsList:
                     byte_counter &= 0x3F
                     new_data_size = record_size - byte_counter
                     record_data = record_data[:byte_counter] + data[pos:pos + new_data_size]
-                    self.__records.append(TpsRecord(record_header_size, ULInt16('data_size').build(record_size)
+                    self.__records.append(TpsRecord(record_header_size, ('data_size' / Int16ul).build(record_size)
                                                     + record_data))
                     pos += new_data_size
 

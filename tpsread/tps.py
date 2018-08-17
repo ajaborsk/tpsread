@@ -14,8 +14,8 @@ from warnings import warn
 from binascii import hexlify
 
 from six import text_type
-from construct import adapters, Array, Byte, Bytes, Const, LFloat32, LFloat64, Struct, SLInt16, SLInt32, UBInt32, \
-    ULInt8, ULInt16, ULInt32
+from construct import Array, Byte, Bytes, Const, Float32l, Float64l, Struct, Int16sl, Int32sl, Int32ub, \
+    Int8ul, Int16ul, Int32ul, ConstError
 
 from .tpscrypt import TpsDecryptor
 from .tpstable import TpsTablesList
@@ -27,17 +27,16 @@ from .utils import check_value
 
 
 # Date structure
-DATE_STRUCT = Struct('date_struct',
-                     Byte('day'),
-                     Byte('month'),
-                     ULInt16('year'), )
+DATE_STRUCT = 'date_struct' / Struct('day' / Byte,
+                     'month' / Byte,
+                     'year' / Int16ul, ) 
 
 # Time structure
-TIME_STRUCT = Struct('time_struct',
-                     Byte('centisecond'),
-                     Byte('second'),
-                     Byte('minute'),
-                     Byte('hour'))
+TIME_STRUCT = 'time_struct' / Struct(
+                     'centisecond' / Byte,
+                     'second' / Byte,
+                     'minute' / Byte,
+                     'hour' / Byte)
 
 
 class TPS:
@@ -85,24 +84,26 @@ class TPS:
 
             try:
                 # TPS file header
-                header = Struct('header',
-                                ULInt32('offset'),
-                                ULInt16('size'),
-                                ULInt32('file_size'),
-                                ULInt32('allocated_file_size'),
-                                Const(Bytes('top_speed_mark', 6), b'tOpS\x00\x00'),
-                                UBInt32('last_issued_row'),
-                                ULInt32('change_count'),
-                                ULInt32('page_root_ref'),
-                                Array(lambda ctx: (ctx['size'] - 0x20) / 2 / 4, ULInt32('block_start_ref')),
-                                Array(lambda ctx: (ctx['size'] - 0x20) / 2 / 4, ULInt32('block_end_ref')), )
-
+                header = 'header' / Struct(
+                                'offset' / Int32ul,
+                                'size' / Int16ul,
+                                'file_size' / Int32ul,
+                                'allocated_file_size' / Int32ul,
+                                'top_speed_mark' / Const(b'tOpS\x00\x00', Bytes(6)),
+                                'last_issued_row' / Int32ub,
+                                'change_count' / Int32ul,
+                                'page_root_ref' / Int32ul,
+                                'block_start_ref' / Array(lambda ctx: (ctx['size'] - 0x20) // 2 // 4, Int32ul),
+                                'block_end_ref' / Array(lambda ctx: (ctx['size'] - 0x20) // 2 // 4, Int32ul))
+                print("Reading header...")
                 self.header = header.parse(self.read(0x200))
+                print("Reading pages...")
                 self.pages = TpsPagesList(self, self.header.page_root_ref, check=self.check)
+                print("Reading tables...")
                 self.tables = TpsTablesList(self, encoding=self.encoding, check=self.check)
                 self.set_current_table(current_tablename)
-            except adapters.ConstError:
-                print('Bad cryptographic keys.')
+            except ConstError as errr:
+                print('Bad cryptographic keys.', self.header, errr)
 
     def block_contains(self, start_ref, end_ref):
         for i in range(len(self.header.block_start_ref)):
@@ -124,11 +125,15 @@ class TPS:
         self.tps_file.seek(pos)
 
     def __iter__(self):
+
+
         table_definition = self.tables.get_definition(self.current_table_number)
+        #print("n, table_definition", self.current_table_number, table_definition)
         for page_ref in self.pages.list():
             if self.pages[page_ref].hierarchy_level == 0:
                 for record in TpsRecordsList(self, self.pages[page_ref], encoding=self.encoding, check=self.check):
                     if record.type == 'DATA' and record.data.table_number == self.current_table_number:
+                        #print(record, record.data, record.data.data)
                         check_value('table_record_size', len(record.data.data), table_definition.record_size)
                         # TODO convert name to string
                         fields = {"b':RecNo'": record.data.record_number}
@@ -136,34 +141,34 @@ class TPS:
                             field_data = record.data.data[field.offset:field.offset + field.size]
                             value = ''
                             if field.type == 'BYTE':
-                                value = ULInt8('byte').parse(field_data)
+                                value = ('byte' / Int8ul).parse(field_data)
                             elif field.type == 'SHORT':
-                                value = SLInt16('short').parse(field_data)
+                                value = ('short' / Int16sl).parse(field_data)
                             elif field.type == 'USHORT':
-                                value = ULInt16('ushort').parse(field_data)
+                                value = ('ushort' / Int16ul).parse(field_data)
                             elif field.type == 'DATE':
                                 value = self.to_date(field_data)
                             elif field.type == 'TIME':
                                 value = self.to_time(field_data)
                             elif field.type == 'LONG':
                                 #TODO
-                                if field.name.decode(encoding='cp437').split(':')[1].lower() in self.date_fieldname:
-                                    if SLInt32('long').parse(field_data) == 0:
+                                if field.name.split(':')[1].lower() in self.date_fieldname:
+                                    if Int32sl('long').parse(field_data) == 0:
                                         value = None
                                     else:
-                                        value = date.fromordinal(657433 + SLInt32('long').parse(field_data))
-                                elif field.name.decode(encoding='cp437').split(':')[1].lower() in self.time_fieldname:
-                                    s, ms = divmod(SLInt32('long').parse(field_data), 100)
+                                        value = date.fromordinal(657433 + Int32sl('long').parse(field_data))
+                                elif field.name.split(':')[1].lower() in self.time_fieldname:
+                                    s, ms = divmod(Int32sl('long').parse(field_data), 100)
                                     value = str('{}.{:03d}'.format(time.strftime('%Y-%m-%d %H:%M:%S',
                                                                                  time.gmtime(s)), ms))
                                 else:
-                                    value = SLInt32('long').parse(field_data)
+                                    value = ('long' / Int32sl).parse(field_data)
                             elif field.type == 'ULONG':
-                                value = ULInt32('ulong').parse(field_data)
+                                value = ('ulong' / Int32ul).parse(field_data)
                             elif field.type == 'FLOAT':
-                                value = LFloat32('float').parse(field_data)
+                                value = ('float' / Float32l).parse(field_data)
                             elif field.type == 'DOUBLE':
-                                value = LFloat64('double').parse(field_data)
+                                value = ('double' / Float64l).parse(field_data)
                             elif field.type == 'DECIMAL':
                                 # TODO BCD
                                 if field_data[0] & 0xF0 == 0xF0:
@@ -190,7 +195,10 @@ class TPS:
                         yield fields
 
     def set_current_table(self, tablename):
+        print("set_current_table for '"+tablename+"'...")
         self.current_table_number = self.tables.get_number(tablename)
+        print('set to', self.current_table_number)
+        print(self.tables)
 
     def to_date(self, value):
         value_date = DATE_STRUCT.parse(value)

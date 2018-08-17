@@ -2,12 +2,12 @@
 TPS File Table
 """
 
-from construct import Array, BitField, BitStruct, Byte, Const, CString, Embed, Enum, Flag, If, Padding, Struct, ULInt16
+from construct import Array, BitsInteger, BitStruct, Byte, Const, CString, Embedded, Enum, Flag, If, Padding, Struct, Int16ul, Probe, this, len_
 
 from .tpsrecord import TpsRecordsList
 
 
-FIELD_TYPE_STRUCT = Enum(Byte('type'),
+FIELD_TYPE_STRUCT = 'type' / Enum(Byte,
                          BYTE=0x1,
                          SHORT=0x2,
                          USHORT=0x3,
@@ -28,86 +28,100 @@ FIELD_TYPE_STRUCT = Enum(Byte('type'),
                          # LIKE (inherited data type)
 )
 
-TABLE_DEFINITION_FIELD_STRUCT = Struct('record_table_definition_field',
+TABLE_DEFINITION_FIELD_STRUCT = 'record_table_definition_field' / Struct(
                                        FIELD_TYPE_STRUCT,
                                        # data offset in record
-                                       ULInt16('offset'),
-                                       CString('name'),
-                                       ULInt16('array_element_count'),
-                                       ULInt16('size'),
+                                       'offset' / Int16ul,
+                                       'name' / CString('ascii'),
+                                       'array_element_count' / Int16ul,
+                                       'size' / Int16ul,
                                        # 1, if fields overlap (OVER attribute), or 0
-                                       ULInt16('overlaps'),
+                                       'overlaps' / Int16ul,
                                        # record number
-                                       ULInt16('number'),
-                                       If(lambda x: x['type'] == 'STRING', ULInt16('array_element_size')),
-                                       If(lambda x: x['type'] == 'STRING', ULInt16('template')),
-                                       If(lambda x: x['type'] == 'CSTRING', ULInt16('array_element_size')),
-                                       If(lambda x: x['type'] == 'CSTRING', ULInt16('template')),
-                                       If(lambda x: x['type'] == 'PSTRING', ULInt16('array_element_size')),
-                                       If(lambda x: x['type'] == 'PSTRING', ULInt16('template')),
-                                       If(lambda x: x['type'] == 'PICTURE', ULInt16('array_element_size')),
-                                       If(lambda x: x['type'] == 'PICTURE', ULInt16('template')),
-                                       If(lambda x: x['type'] == 'DECIMAL', Byte('decimal_count')),
-                                       If(lambda x: x['type'] == 'DECIMAL', Byte('decimal_size')),
-                                       allow_overwrite=True, )
+                                       'number' / Int16ul,
+                                       'array_element_size' / If(this.type == 'STRING' or this.type == 'CSTRING' or this.type == 'PSTRING' or this.type == 'PICTURE', Int16ul),
+                                       'template' / If(this.type == 'STRING' or this.type == 'CSTRING' or this.type == 'PSTRING' or this.type == 'PICTURE', Int16ul),
+#                                       'dummy' / If(this.type == 'CSTRING', Embedded('array_element_size' / Int16ul)),
+#                                       'dummy' / If(this.type == 'CSTRING', Embedded('template' / Int16ul)),
+#                                       'dummy' / If(this.type == 'PSTRING', Embedded('array_element_size' / Int16ul)),
+#                                       'dummy' / If(this.type == 'PSTRING', Embedded('template' / Int16ul)),
+#                                       'dummy' / If(this.type == 'PICTURE', Embedded('array_element_size' / Int16ul)),
+#                                       'dummy' / If(this.type == 'PICTURE', Embedded('template' / Int16ul)),
+                                       'decimal_count' / If(this.type == 'DECIMAL', Byte),
+                                       'decimal_size' / If(this.type == 'DECIMAL', Byte),
+                                       )
+                                       # Original code has this kwarg... allow_overwrite=True, 
 
-INDEX_TYPE_STRUCT = Enum(BitField('type', 2),
+INDEX_TYPE_STRUCT = 'type' / Enum(BitsInteger(2),
                          KEY=0,
                          INDEX=1,
                          DYNAMIC_INDEX=2)
 
-INDEX_FIELD_ORDER_TYPE_STRUCT = Enum(ULInt16('field_order_type'),
+INDEX_FIELD_ORDER_TYPE_STRUCT = 'field_order_type' / Enum(Int16ul,
                                      ASCENDING=0,
                                      DESCENDING=1,
                                      _default_='DESCENDING')
 
-TABLE_DEFINITION_INDEX_STRUCT = Struct('record_table_definition_index',
+TABLE_DEFINITION_INDEX_STRUCT = 'record_table_definition_index' / Struct(
                                        # May be external_filename
                                        # if external_filename == 0, no external file index
-                                       CString('external_filename'),
-                                       If(lambda x: len(x['external_filename']) == 0, Const(Byte('index_mark'), 1)),
-                                       CString('name'),
-                                       Embed(BitStruct('flags',
+                                       'external_filename' / CString('ascii'),
+                                       If(len_(this.external_filename) == 0, 'index_mark' / Const(1, Byte)),
+                                       'name' / CString('ascii'),
+#                                       Embedded('flags' / BitStruct(
+#                                                       Padding(1),
+#                                                       INDEX_TYPE_STRUCT,
+#                                                       Padding(2),
+#                                                       'NOCASE' / Flag,
+#                                                       'OPT' / Flag,
+#                                                       'DUP' / Flag)),
+                                       'flags' / BitStruct(
                                                        Padding(1),
                                                        INDEX_TYPE_STRUCT,
                                                        Padding(2),
-                                                       Flag('NOCASE'),
-                                                       Flag('OPT'),
-                                                       Flag('DUP'))),
-                                       ULInt16('field_count'),
-                                       Array(lambda x: x['field_count'],
-                                             Struct('index_field_propertly',
-                                                    ULInt16('field_number'),
+                                                       'NOCASE' / Flag,
+                                                       'OPT' / Flag,
+                                                       'DUP' / Flag),
+                                       'field_count' / Int16ul,
+                                       Array(this.field_count,
+                                             'index_field_propertly' / Struct(
+                                                    'field_number' / Int16ul,
                                                     INDEX_FIELD_ORDER_TYPE_STRUCT)), )
 
-MEMO_TYPE_STRUCT = Enum(Flag('memo_type'),
+MEMO_TYPE_STRUCT = 'memo_type' / Enum(Flag,
                         MEMO=0,
                         BLOB=1)
 
-TABLE_DEFINITION_MEMO_STRUCT = Struct('record_table_definition_memo',
+TABLE_DEFINITION_MEMO_STRUCT = 'record_table_definition_memo' / Struct(
                                       # May be external_filename
                                       # if external_filename == 0, no external file index
-                                      CString('external_filename'),
-                                      If(lambda x: len(x['external_filename']) == 0, Const(Byte('memo_mark'), 1)),
-                                      CString('name'),
-                                      ULInt16('size'),
-                                      Embed(BitStruct('flags',
+                                      'external_filename' / CString('ascii'),
+                                      If(len_(this.external_filename) == 0, 'memo_mark' / Const(0, Byte)), # Original had a const '1' but it seems a '0' is required...
+                                      'name' / CString('ascii'),
+                                      'size' / Int16ul,
+#                                      Embedded('flags' / BitStruct(
+#                                                      Padding(5),
+#                                                      MEMO_TYPE_STRUCT,
+#                                                      'BINARY' / Flag,
+#                                                      'Flag' / Flag,
+#                                                      Padding(8))), 
+                                      'flags' / BitStruct(
                                                       Padding(5),
                                                       MEMO_TYPE_STRUCT,
-                                                      Flag('BINARY'),
-                                                      Flag('Flag'),
-                                                      Padding(8))), )
+                                                      'BINARY' / Flag,
+                                                      'Flag' / Flag,
+                                                      Padding(8)), )
 
-TABLE_DEFINITION_STRUCT = Struct('record_table_definition',
-                                 ULInt16('min_version_driver'),
+TABLE_DEFINITION_STRUCT = 'record_table_definition' / Struct(
+                                 'min_version_driver' / Int16ul,
                                  # sum all fields sizes in record
-                                 ULInt16('record_size'),
-                                 ULInt16('field_count'),
-                                 ULInt16('memo_count'),
-                                 ULInt16('index_count'),
-                                 Array(lambda x: x['field_count'], TABLE_DEFINITION_FIELD_STRUCT),
-                                 Array(lambda x: x['memo_count'], TABLE_DEFINITION_MEMO_STRUCT),
-                                 Array(lambda x: x['index_count'], TABLE_DEFINITION_INDEX_STRUCT), )
+                                 'record_size' / Int16ul,
+                                 'field_count' / Int16ul,
+                                 'memo_count' / Int16ul,
+                                 'index_count' / Int16ul,
+                                 'record_table_definition_field' / Array(this.field_count, TABLE_DEFINITION_FIELD_STRUCT),
+                                 'record_table_definition_memo' / Array(this.memo_count, TABLE_DEFINITION_MEMO_STRUCT),
+                                 'record_table_definition_index' / Array(this.index_count, TABLE_DEFINITION_INDEX_STRUCT), )
 
 
 class TpsTable:
@@ -128,8 +142,10 @@ class TpsTable:
             return False
 
     def add_definition(self, definition):
-        portion_number = ULInt16('portion_number').parse(definition[:2])
+        portion_number = ('portion_number' / Int16ul).parse(definition[:2])
+        #print("portion_number = ", portion_number, definition)
         self.definition_bytes[portion_number] = definition[2:]
+        #print(self, self.definition_bytes)
 
     def add_statistics(self, statistics_struct):
         # TODO remove metadatatype from staticstics_struct
@@ -139,6 +155,7 @@ class TpsTable:
         definition_bytes = b''
         for value in self.definition_bytes.values():
             definition_bytes += value
+        #print(self, "definition_bytes:", definition_bytes)
         self.definition = TABLE_DEFINITION_STRUCT.parse(definition_bytes)
         return self.definition
 
@@ -165,11 +182,16 @@ class TpsTablesList:
                     if record.type != 'NULL' and record.data.table_number not in self.__tables.keys():
                         self.__tables[record.data.table_number] = TpsTable(record.data.table_number)
                     if record.type == 'TABLE_NAME':
-                        self.__tables[record.data.table_number].set_name(record.data.table_name.decode(self.encoding))
+                        print('Table name set...')
+                        print('  to:', record.data.table_name)
+                        self.__tables[record.data.table_number].set_name(record.data.table_name)
                     if record.type == 'TABLE_DEFINITION':
+                        print('Table definition read...')
                         self.__tables[record.data.table_number].add_definition(record.data.table_definition_bytes)
                         #d = i
                     if record.type == 'METADATA':
+                        #print('Table metadata read...')
+                        #print(record.data)
                         self.__tables[record.data.table_number].add_statistics(record.data)
                         #s = i
                     #TODO optimize (table_definition and metadata(statistics))
@@ -194,5 +216,6 @@ class TpsTablesList:
 
     def get_number(self, name):
         for i in self.__tables:
+            print("table ", i, "name=", self.__tables[i].name)
             if self.__tables[i].name == name:
                 return i
